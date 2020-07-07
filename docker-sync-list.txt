@@ -1,0 +1,8 @@
+hello-world:latest
+vault:1.4.2
+wesleydeanflexion/tfsec:latest
+zricethezav/gitleaks:v4.3.1
+zricethezav/gitleaks:latest
+jinro79/nginx-git
+jinro79/nginx-git:
+jinro79/nginx-git:latest

@@ -21,53 +21,13 @@ client = docker.from_env()
 cli = docker.APIClient(base_url='unix://var/run/docker.sock')
 
 
-def main():
-    parser = argparse.ArgumentParser(prog="save_docker_images.py",
-                                     description="""
-                                     Pulls docker images from the internet and saves them to individual files or as a single file.
-                                     If an image has multiple tags only one of them will be used for the file name, but the tags will be preserved when loaded.
-                                     """
-                                     )
-    parser.add_argument("-f", "--filename", type=str,
-                        help="A file listing docker images to load and save as a tar file.")
-    parser.add_argument("-i", "--image", nargs="+", help="List of docker images to pull and save.")
-    parser.add_argument("-o", "--output", type=str, default=".",
-                        help="Path to save the exported tar files. also the location to read in tar files. Default is ','")
-    parser.add_argument("--force", dest='force', action='store_true', help="Force save image(s) to file")
-    allinone_group = parser.add_argument_group("all-in-one")
-    allinone_group.add_argument("--allinone", dest='allinone', action='store_true',
-                                help="Flag to save all images in a single tar file.")
-    allinone_group.set_defaults(allinone=False)
-    allinone_group.add_argument("--tar_filename", type=str, default="allinone.tar",
-                                help="Path and File name for the all in one tar.")
-
-    args = parser.parse_args()
-    init_logging(args, parser)
-
-    images_to_save = []
-    images_to_process = []
-    # read the file
-    if args.filename is not None:
-        images_to_process = read_image_from_file(args)
-    # add any images that were added with image argument
-    if args.image:
-        logging.info("Adding the images passed as parameters to the images to process.")
-        images_to_process.extend(args.image)
-    else:
-        logging.info("No images were passed through the command line.")
-
-    existing_tars = get_tars(args)
-    # local_images_file_names = get_local_image_files_names()
-
-    # Pull images from the remote registry
-    images_to_save.extend(pull_images(args, images_to_process, existing_tars))
-
-    if args.allinone:
-        logging.info("All in one flag is set to true and attempting to save all images as a single file.")
-        save_all_images_in_one_tar(args, images_to_save)
-    else:
-        # save images as tars
-        save_docker_images(args, images_to_save)
+def write_successful_run_timestamp_to_file(args):
+    timestamp=datetime.now().astimezone().replace(microsecond=0).isoformat()
+    with open(f"{args.output}/save_docker_images_last_successful_run.txt", 'w+') as f:
+        f.seek(0)
+        f.write(timestamp)
+        f.truncate()
+    logging.info(f"Recorded {timestamp} to {args.output}/save_docker_images_last_successful_run.txt")
 
 
 def save_all_images_in_one_tar(args, images_to_save):
@@ -155,8 +115,8 @@ def pull_images(args, images_to_process, existing_tars):
     """
     images_to_save = set()
     image_name: str
-    if args.allinone:
-        images_to_save_allinone = set()
+    if args.all_in_one:
+        images_to_save_all_in_one = set()
     for image_name in images_to_process:
         try:
             logging.info("Pulling %s" % image_name)
@@ -167,10 +127,10 @@ def pull_images(args, images_to_process, existing_tars):
                     # images_to_save.add[client.images.get(image_name).short_id] = image_name
                     images_to_save.add(image_name)
                     logging.info("Added %s to images_to_save" % image_name)
-                    if args.allinone:
+                    if args.all_in_one:
                         for tag in client.images.get(image_name).tags:
-                            images_to_save_allinone.add(tag)
-                        # images_to_save_allinone.add(tuple(client.images.get(image_name).tags))
+                            images_to_save_all_in_one.add(tag)
+                        # images_to_save_all_in_one.add(tuple(client.images.get(image_name).tags))
                 logging.info(output)
                 logging.info("Completed pulling %s" % image_name)
                 # if get_filename(client.images.get(image_name).tags[0]) not in existing_tars:
@@ -180,18 +140,18 @@ def pull_images(args, images_to_process, existing_tars):
                 logging.info("Added %s to images to save" % image_name)
             if args.force:
                 images_to_save[client.images.get(image_name).short_id] = image_name
-                if args.allinone:
+                if args.all_in_one:
                     for tag in client.images.get(image_name).tags:
-                        images_to_save_allinone.add(tag)
-                        # images_to_save_allinone.add(tuple(client.images.get(image_name).tags))
+                        images_to_save_all_in_one.add(tag)
+                        # images_to_save_all_in_one.add(tuple(client.images.get(image_name).tags))
         except requests.exceptions.HTTPError as e:
             logging.error(e)
             pass
         except docker.errors.APIError as e:
             logging.error(e)
             pass
-    if args.allinone:
-        return list(images_to_save_allinone)
+    if args.all_in_one:
+        return list(images_to_save_all_in_one)
     return list(images_to_save)
 
 
@@ -238,6 +198,62 @@ def init_logging(args, parser):
         sys.exit(1)
     # Now, we can log to the root logger, or any other logger. First the root...
     logging.info('Initialized the logger for %s.' % parser.prog)
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="save_docker_images.py",
+                                     description="""
+                                     Pulls docker images from the internet and saves them to individual files or as a 
+                                     single file. If an image has multiple tags only one of them will be used for the 
+                                    file name, but the tags will be preserved when loaded.
+                                     """
+                                     )
+    parser.add_argument("-f", "--filename", type=str,
+                        help="A file listing docker images to load and save as a tar file.")
+    parser.add_argument("-i", "--image", nargs="+", help="List of docker images to pull and save.")
+    parser.add_argument("-o", "--output", type=str, default=".",
+                        help="Path to save the tar files. also the location to read in tar files. Default is ','")
+    parser.add_argument("--force", dest='force', action='store_true', help="Force save image(s) to file")
+    all_in_one_group = parser.add_argument_group("all-in-one")
+    all_in_one_group.add_argument("-a", "--all_in_one", dest='all_in_one', action='store_true',
+                                help="Flag to save all images in a single tar file.")
+    all_in_one_group.set_defaults(all_in_one=False)
+    all_in_one_group.add_argument("--tar_filename", type=str, default="all_in_one.tar",
+                                help="Path and File name for the all in one tar.")
+
+    args = parser.parse_args()
+    init_logging(args, parser)
+
+    images_to_save = []
+    images_to_process = []
+    # read the file
+    if args.filename is not None:
+        images_to_process = read_image_from_file(args)
+    # add any images that were added with image argument
+    if args.image:
+        logging.info("Adding the images passed as parameters to the images to process.")
+        images_to_process.extend(args.image)
+    else:
+        logging.info("No images were passed through the command line.")
+
+    existing_tars = get_tars(args)
+    # local_images_file_names = get_local_image_files_names()
+
+    # Pull images from the remote registry
+    images_to_save.extend(pull_images(args, images_to_process, existing_tars))
+
+    if len(images_to_save) < 1:
+        logging.info("There are no images to save.")
+    elif args.all_in_one:
+        logging.info("All in one flag is set to true and attempting to save all images as a single file.")
+        save_all_images_in_one_tar(args, images_to_save)
+    else:
+        # save images as tars
+        save_docker_images(args, images_to_save)
+
+    write_successful_run_timestamp_to_file(args)
+
+    logging.info(f"End of {os.path.basename(__file__)}")
 
 
 # Run the main() function
